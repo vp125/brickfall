@@ -510,14 +510,6 @@ func _ready() -> void:
 			shot_frame = int(a.substr(8))
 		elif a.begins_with("--level="):
 			start_level = clampi(int(a.substr(8)) - 1, 0, LEVELS.size() - 1)
-	if OS.has_feature("web") and JavaScriptBridge.eval("location.search.indexOf('perf') >= 0") == true:
-		perf_test = true
-		perf_frame = 500
-		start_level = 5
-	if OS.has_feature("web") and JavaScriptBridge.eval("location.search.indexOf('debug') >= 0") == true:
-		dbg_on = true
-		dbg_nosound = JavaScriptBridge.eval("location.search.indexOf('nosound') >= 0") == true
-		dbg_nofx = JavaScriptBridge.eval("location.search.indexOf('nofx') >= 0") == true
 	W = get_viewport().get_visible_rect().size.x
 	get_viewport().size_changed.connect(on_resized)
 	build_world()
@@ -1387,6 +1379,14 @@ func play(sound: String, pitch := 1.0, vol_db := 0.0) -> void:
 func _process(delta: float) -> void:
 	var dt := minf(delta, 1.0 / 30.0)
 	var dbg_t0 := Time.get_ticks_usec()
+	if frame_i == 30 and OS.has_feature("web"):
+		# link flags (?debug, ?nosound, ?nofx), read a few frames in: a script call while the scene is
+		# still being built breaks the 3D view on the web
+		var q: Variant = JavaScriptBridge.eval("location.search")
+		if q is String:
+			dbg_on = q.contains("debug")
+			dbg_nosound = dbg_on and q.contains("nosound")
+			dbg_nofx = dbg_on and q.contains("nofx")
 	if perf_test:
 		if frame_i == perf_frame:
 			state = State.PLAY
