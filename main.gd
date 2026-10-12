@@ -372,6 +372,7 @@ class Part:
 	var flash := false # true = expanding light burst, false = tumbling crystal shard
 	var node: MeshInstance3D
 	var mat: ShaderMaterial # per-instance material, only used by flashes
+	var pool_key := "" # which flash pool the node returns to
 
 var state: State
 var level := 0
@@ -383,6 +384,7 @@ var balls: Array[Ball] = []
 var drops: Array[Drop] = []
 var parts: Array[Part] = []
 var shard_pool: Array[MeshInstance3D] = []
+var flash_pool := {} # kind -> Array of hidden flash nodes (each keeps its own mesh and material)
 var paddle_x := W / 2.0
 var paddle_w := PADDLE_W
 var paddle_synced_w := -1.0 # width the paddle meshes were last built for
@@ -505,6 +507,7 @@ func _ready() -> void:
 	set_quality(low_quality, false)
 	prewarm_effects()
 	fill_shard_pool(110)
+	fill_flash_pool()
 	new_game()
 	if start_level > 0:
 		level = start_level
@@ -527,12 +530,56 @@ func take_shard(mesh: Mesh) -> MeshInstance3D:
 	return mi
 
 
+func make_flash(kind: String) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	var bs := Vector2(BW * S, BH * S)
+	match kind:
+		"burst":
+			mi.mesh = plane(bs + Vector2(1.2, 1.2))
+			mi.material_override = halo_mat(Color.WHITE, bs, 0.03, 0.6, 3.0 / GLOW)
+		"blast":
+			mi.mesh = plane(Vector2(4.3, 3.7))
+			mi.material_override = halo_mat(Color("ff7a2a"), Vector2(1.5, 0.9), 0.3, 1.4, 1.0)
+		_:
+			var rm := ShaderMaterial.new()
+			rm.shader = ring_shader
+			rm.set_shader_parameter("size", bs)
+			mi.mesh = plane(bs + Vector2(1.6, 1.6))
+			mi.material_override = rm
+	mi.visible = false
+	world.add_child(mi)
+	return mi
+
+
+func take_flash(kind: String) -> MeshInstance3D:
+	var pool: Array = flash_pool[kind]
+	var mi: MeshInstance3D = pool.pop_back() if not pool.is_empty() else make_flash(kind)
+	mi.visible = true
+	return mi
+
+
+## Pooled flashes keep the old brick size, so after a resize they are rebuilt on demand.
+func clear_flash_pool() -> void:
+	for kind in flash_pool:
+		for mi in flash_pool[kind]:
+			mi.queue_free()
+		flash_pool[kind] = []
+
+
 func release_part(p: Part) -> void:
 	if p.flash:
-		p.node.queue_free()
+		p.node.visible = false
+		flash_pool[p.pool_key].append(p.node)
 	else:
 		p.node.visible = false
 		shard_pool.append(p.node)
+
+
+func fill_flash_pool() -> void:
+	for kind in ["burst", "blast", "ring"]:
+		flash_pool[kind] = []
+	for kind in ["burst", "burst", "burst", "burst", "burst", "burst", "blast", "blast", "ring", "ring", "ring"]:
+		flash_pool[kind].append(make_flash(kind))
 
 
 func fill_shard_pool(n: int) -> void:
@@ -940,6 +987,7 @@ func make_brick_node(b: Brick) -> void:
 
 ## After the window changes size the bricks keep their columns but stretch to the new width.
 func relayout_bricks() -> void:
+	clear_flash_pool()
 	set_brick_size()
 	var left := (W - (COLS * BW + (COLS - 1) * GAP)) / 2.0
 	for b in bricks:
@@ -1722,14 +1770,10 @@ func layer_break(k: Brick) -> void:
 	f.h = 0.34
 	f.life = 0.45
 	f.max_life = f.life
-	f.mat = ShaderMaterial.new()
-	f.mat.shader = ring_shader
+	var fm := take_flash("ring")
+	f.mat = fm.material_override
 	f.mat.set_shader_parameter("base_col", ROW_COLORS[k.row].lerp(Color.WHITE, 0.55))
-	f.mat.set_shader_parameter("size", sz)
-	var fm := MeshInstance3D.new()
-	fm.mesh = plane(sz + Vector2(1.6, 1.6))
-	fm.material_override = f.mat
-	world.add_child(fm)
+	f.pool_key = "ring"
 	f.node = fm
 	parts.append(f)
 	for i in (3 if low_quality else 7):
@@ -1767,7 +1811,7 @@ func break_brick(first: Brick) -> void:
 		k.node.queue_free()
 		score += ROW_POINTS[k.row] + (10 * chain if chain > 0 else 0)
 		speed = minf(SPEED_MAX, speed + 4.0)
-		burst(k)
+		burst(k, 5 if chain > 0 else -1)
 		if k.kind == K_BOSS:
 			score += 2000
 			for j in 6:
@@ -1803,11 +1847,9 @@ func blast(center: Vector2) -> void:
 	f.h = 0.35
 	f.life = 0.4
 	f.max_life = f.life
-	f.mat = halo_mat(Color("ff7a2a"), Vector2(1.5, 0.9), 0.3, 1.4, 1.0)
-	var fm := MeshInstance3D.new()
-	fm.mesh = plane(Vector2(1.5 + 2.8, 0.9 + 2.8))
-	fm.material_override = f.mat
-	world.add_child(fm)
+	var fm := take_flash("blast")
+	f.mat = fm.material_override
+	f.pool_key = "blast"
 	f.node = fm
 	parts.append(f)
 
@@ -1839,7 +1881,7 @@ func new_drop(pos: Vector2, kind: String) -> Drop:
 	return d
 
 
-func burst(k: Brick) -> void:
+func burst(k: Brick, shards := -1) -> void:
 	var center := k.rect.get_center()
 	# a quick light burst where the crystal broke
 	var f := Part.new()
@@ -1848,15 +1890,14 @@ func burst(k: Brick) -> void:
 	f.h = 0.3
 	f.life = 0.28
 	f.max_life = f.life
-	f.mat = halo_mat(ROW_COLORS[k.row].lerp(Color.WHITE, 0.35), brick_mesh.size, 0.03, 0.6, 3.0 / GLOW)
-	var fm := MeshInstance3D.new()
-	fm.mesh = plane(brick_mesh.size + Vector2(1.2, 1.2))
-	fm.material_override = f.mat
-	world.add_child(fm)
+	var fm := take_flash("burst")
+	f.mat = fm.material_override
+	f.mat.set_shader_parameter("base_col", ROW_COLORS[k.row].lerp(Color.WHITE, 0.35))
+	f.pool_key = "burst"
 	f.node = fm
 	parts.append(f)
 	# crystal shards fly outward and tumble
-	for i in (7 if low_quality else 16):
+	for i in (shards if shards > 0 else (7 if low_quality else 16)):
 		var p := Part.new()
 		p.pos = k.rect.position + Vector2(randf() * k.rect.size.x, randf() * k.rect.size.y)
 		var dir := (p.pos - center)
