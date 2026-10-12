@@ -395,6 +395,8 @@ var shake := 0.0
 var perf_frame := 60
 var dbg_on := false # ?debug in the web link: show frame timing under the HUD
 var dbg_t := 0.0
+var dbg_nosound := false # ?debug&nosound: skip all sound effects
+var dbg_nofx := false # ?debug&nofx: skip shatter shards and flashes
 var dbg_delta := 0.0 # worst frame time / worst script time in the current 2 s window
 var dbg_script := 0.0
 var dbg_shown := ""
@@ -514,6 +516,8 @@ func _ready() -> void:
 		start_level = 5
 	if OS.has_feature("web") and JavaScriptBridge.eval("location.search.indexOf('debug') >= 0") == true:
 		dbg_on = true
+		dbg_nosound = JavaScriptBridge.eval("location.search.indexOf('nosound') >= 0") == true
+		dbg_nofx = JavaScriptBridge.eval("location.search.indexOf('nofx') >= 0") == true
 	W = get_viewport().get_visible_rect().size.x
 	get_viewport().size_changed.connect(on_resized)
 	build_world()
@@ -1367,6 +1371,8 @@ func toggle_mute() -> void:
 
 
 func play(sound: String, pitch := 1.0, vol_db := 0.0) -> void:
+	if dbg_nosound:
+		return
 	if not sfx.has(sound):
 		return
 	var p := sfx_players[sfx_next]
@@ -1877,6 +1883,8 @@ func break_brick(first: Brick) -> void:
 func blast(center: Vector2) -> void:
 	play("boom", 1.0, 2.0)
 	shake = 0.5
+	if dbg_nofx:
+		return
 	var f := Part.new()
 	f.flash = true
 	f.pos = center
@@ -1918,6 +1926,8 @@ func new_drop(pos: Vector2, kind: String) -> Drop:
 
 
 func burst(k: Brick, shards := -1) -> void:
+	if dbg_nofx:
+		return
 	var center := k.rect.get_center()
 	# a quick light burst where the crystal broke
 	var f := Part.new()
