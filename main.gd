@@ -1099,18 +1099,21 @@ func setup_audio() -> void:
 	audio_loading = true
 	if OS.has_feature("web"):
 		# the web export runs without threads, so build after the first frames are on screen
-		get_tree().create_timer(0.8).timeout.connect(_build_audio_now)
+		get_tree().create_timer(0.3).timeout.connect(_build_audio_now)
 	else:
 		audio_thread = Thread.new()
 		audio_thread.start(_build_audio)
 
 
 func _build_audio_now() -> void:
-	_on_audio_ready(Synth.build_all())
+	# main-thread build: yields every few ms so the game keeps running while sound loads
+	Synth.budget_ms = 6.0
+	var result: Dictionary = await Synth.build_all()
+	_on_audio_ready(result)
 
 
 func _build_audio() -> void:
-	var result := Synth.build_all()
+	var result: Dictionary = await Synth.build_all()
 	_on_audio_ready.call_deferred(result)
 
 
@@ -1859,7 +1862,7 @@ func _draw() -> void:
 			text(String(LEVELS[level]["info"]), H / 2.0 + 76.0, 16, INK, HORIZONTAL_ALIGNMENT_CENTER)
 			text("Paddle %d%%   -   Ball speed %.1fx" % [roundi(100.0 * base_paddle_w() / PADDLE_W), speed / SPEED_START], H / 2.0 + 102.0, 14, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 			if audio_loading:
-				text("Loading sound...", H - 46.0, 13, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
+				text("Loading sound... %d%%" % roundi(Synth.progress * 100.0), H - 86.0, 13, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 			if not scores.is_empty():
 				text("HIGH SCORE   %s   %06d" % [scores[0]["name"], int(scores[0]["score"])], H - 24.0, 14, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 			banner("", "Tap, click or press Space to launch", 0.0, INK)
