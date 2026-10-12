@@ -116,23 +116,6 @@ const MAGENTA := Color("ff2e9a")
 const HUD_BG := Color(0.03, 0.04, 0.09, 0.88)
 const Synth := preload("res://audio_synth.gd")
 
-const FLOOR_SHADER := """
-shader_type spatial;
-render_mode unshaded, cull_disabled;
-varying vec3 wp;
-void vertex() { wp = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz; }
-void fragment() {
-	vec2 g = vec2(wp.x, wp.z - TIME * 0.5);
-	vec2 d = min(fract(g), 1.0 - fract(g));
-	float m = min(d.x, d.y);
-	float line = 1.0 - smoothstep(0.0, 0.045, m);
-	float halo = 1.0 - smoothstep(0.0, 0.2, m);
-	vec3 col = mix(vec3(1.0, 0.15, 0.65), vec3(0.0, 0.85, 1.0), smoothstep(-7.0, 7.0, wp.z));
-	float fade = 1.0 - smoothstep(5.0, 17.0, length(wp.xz * vec2(0.8, 1.0)));
-	ALBEDO = vec3(0.012, 0.016, 0.045) + col * (line * 0.5 + halo * 0.07) * fade;
-}
-"""
-
 # Rounded, bevelled "pillow" shape drawn on a flat quad. The bevel normal is derived from
 # the rounded-rect distance field, then lit from the top-left, which gives each piece
 # a gradient body, a bright rim on the lit edge and a soft neon edge glow.
@@ -549,7 +532,7 @@ func make_flash(kind: String) -> MeshInstance3D:
 			mi.mesh = plane(bs + Vector2(1.2, 1.2))
 			mi.material_override = halo_mat(Color.WHITE, bs, 0.03, 0.6, 3.0 / GLOW)
 		"blast":
-			mi.mesh = plane(Vector2(4.3, 3.7))
+			mi.mesh = plane(Vector2(3.2, 2.7))
 			mi.material_override = halo_mat(Color("ff7a2a"), Vector2(1.5, 0.9), 0.3, 1.4, 1.0)
 		_:
 			var rm := ShaderMaterial.new()
@@ -790,18 +773,6 @@ func build_world() -> void:
 	camera.rotation_degrees = Vector3(-90, 0, 0)
 	world.add_child(camera)
 
-	# flowing neon floor
-	var sh := Shader.new()
-	sh.code = FLOOR_SHADER
-	var fm := ShaderMaterial.new()
-	fm.shader = sh
-	var floor_mesh := PlaneMesh.new()
-	floor_mesh.size = Vector2(60, 44)
-	var floor_node := MeshInstance3D.new()
-	floor_node.mesh = floor_mesh
-	floor_node.material_override = fm
-	floor_node.position = Vector3(0, -0.02, 0)
-	world.add_child(floor_node)
 
 	build_rails()
 
@@ -1853,7 +1824,7 @@ func break_brick(first: Brick) -> void:
 		k.node.queue_free()
 		score += ROW_POINTS[k.row] + (10 * chain if chain > 0 else 0)
 		speed = minf(SPEED_MAX, speed + 4.0)
-		burst(k, 5 if chain > 0 else -1)
+		burst(k, 3 if chain > 0 else -1, chain == 0)
 		if k.kind == K_BOSS:
 			score += 2000
 			for j in 6:
@@ -1925,25 +1896,29 @@ func new_drop(pos: Vector2, kind: String) -> Drop:
 	return d
 
 
-func burst(k: Brick, shards := -1) -> void:
+func burst(k: Brick, shards := -1, with_flash := true) -> void:
 	if dbg_nofx:
 		return
 	var center := k.rect.get_center()
 	# a quick light burst where the crystal broke
-	var f := Part.new()
-	f.flash = true
-	f.pos = center
-	f.h = 0.3
-	f.life = 0.28
-	f.max_life = f.life
-	var fm := take_flash("burst")
-	f.mat = fm.material_override
-	f.mat.set_shader_parameter("base_col", ROW_COLORS[k.row].lerp(Color.WHITE, 0.35))
-	f.pool_key = "burst"
-	f.node = fm
-	parts.append(f)
+	if with_flash:
+		var f := Part.new()
+		f.flash = true
+		f.pos = center
+		f.h = 0.3
+		f.life = 0.28
+		f.max_life = f.life
+		var fm := take_flash("burst")
+		f.mat = fm.material_override
+		f.mat.set_shader_parameter("base_col", ROW_COLORS[k.row].lerp(Color.WHITE, 0.35))
+		f.pool_key = "burst"
+		f.node = fm
+		parts.append(f)
 	# crystal shards fly outward and tumble
-	for i in (shards if shards > 0 else (7 if low_quality else 16)):
+	var n_shards := shards if shards > 0 else (7 if low_quality else 16)
+	if parts.size() > 90:
+		n_shards = mini(n_shards, 2) # a long chain is already busy enough
+	for i in n_shards:
 		var p := Part.new()
 		p.pos = k.rect.position + Vector2(randf() * k.rect.size.x, randf() * k.rect.size.y)
 		var dir := (p.pos - center)
