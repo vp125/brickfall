@@ -7,6 +7,7 @@ extends Node
 const GAME_SCENE := "res://main.tscn"
 const BASE_W := 800.0 # the game never gets narrower than this, or shorter than BASE_H
 const BASE_H := 600.0
+const MOBILE_MAX_SCALE := 1.25 # render pixels per logical unit, at most, on phones and the web
 
 var sv: SubViewport
 var holder: Control
@@ -56,6 +57,10 @@ func layout() -> void:
 		return
 	var win_px := Vector2(DisplayServer.window_get_size())
 	var k := maxf(win_px.x / vis.x, 0.01)
+	# phones report 2-3x pixel density; drawing the game at that size is the main cost, so
+	# render it smaller and let the screen scale the picture up
+	if OS.has_feature("web") or OS.has_feature("mobile"):
+		k = minf(k, MOBILE_MAX_SCALE)
 	rotated = vis.y > vis.x
 	# the landscape area the game gets, in logical units of the window
 	var area := Vector2(vis.y, vis.x) if rotated else vis
