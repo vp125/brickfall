@@ -332,6 +332,8 @@ enum State { READY, PLAY, PAUSED, OVER, WIN, CLEARED, NAME }
 
 class Brick:
 	var pop := 0.0 # brief scale pulse after a layer breaks
+	var col := 0 # grid column, so the brick can be re-laid out when the window changes
+	var halo: ShaderMaterial
 	var kind := 0 # K_NORMAL, K_ARMOR (never breaks) or K_BOMB (explodes neighbours)
 	var rect: Rect2
 	var row: int
@@ -385,6 +387,7 @@ var paddle_w := PADDLE_W
 var wide_left := 0.0
 var mouse_active := false
 var shake := 0.0
+var web_check_t := 0.0
 var PADDLE_Y := H - 44.0 # raised on touch layouts so a thumb and the home bar stay clear
 
 var _font: Font
@@ -829,46 +832,69 @@ func load_level() -> void:
 			b.rect = Rect2(left + c * (BW + GAP), TOP + r * (BH + GAP), BW, BH)
 			b.row = r % ROW_COLORS.size()
 			var ch: String = line[c]
-			var halo: ShaderMaterial = halo_row_mats[b.row]
+			b.col = c
+			b.halo = halo_row_mats[b.row]
 			match ch:
 				"A":
 					b.kind = K_ARMOR
 					b.hits = 1
 					b.mat = armor_mat.duplicate()
-					halo = armor_halo_mat
+					b.halo = armor_halo_mat
 				"X":
 					b.kind = K_BOMB
 					b.hits = 1
 					b.mat = bomb_mat.duplicate()
-					halo = bomb_halo_mat
+					b.halo = bomb_halo_mat
 				_:
 					b.hits = int(ch)
 					b.mat = row_mats[b.row].duplicate()
 			b.max_hits = b.hits
 			b.mat.set_shader_parameter("phase", randf() * TAU)
-			var mi := MeshInstance3D.new()
-			mi.mesh = brick_mesh
-			mi.material_override = b.mat
-			mi.position = to3(b.rect.get_center(), 0.23)
-			add_shadow(mi, brick_shadow_mesh, 0.04)
-			add_halo(mi, brick_mesh.size, halo, 0.4)
-			if b.kind == K_BOMB:
-				var lbl := Label3D.new()
-				lbl.text = "!"
-				lbl.font_size = 56
-				lbl.pixel_size = 0.009
-				lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-				lbl.no_depth_test = true
-				lbl.outline_size = 12
-				lbl.outline_modulate = Color("b0300c")
-				lbl.position = Vector3(0, 0.3, 0)
-				mi.add_child(lbl)
-			world.add_child(mi)
-			b.node = mi
+			make_brick_node(b)
 			bricks.append(b)
 	if LEVELS[level].has("boss"):
 		spawn_boss()
 	reset_serve()
+
+
+## Builds (or rebuilds) the 3D node for a brick from its current rect and material.
+func make_brick_node(b: Brick) -> void:
+	var mi := MeshInstance3D.new()
+	mi.mesh = brick_mesh
+	mi.material_override = b.mat
+	mi.position = to3(b.rect.get_center(), 0.23)
+	add_shadow(mi, brick_shadow_mesh, 0.04)
+	add_halo(mi, brick_mesh.size, b.halo, 0.4)
+	if b.kind == K_BOMB:
+		var lbl := Label3D.new()
+		lbl.text = "!"
+		lbl.font_size = 56
+		lbl.pixel_size = 0.009
+		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		lbl.no_depth_test = true
+		lbl.outline_size = 12
+		lbl.outline_modulate = Color("b0300c")
+		lbl.position = Vector3(0, 0.3, 0)
+		mi.add_child(lbl)
+	world.add_child(mi)
+	b.node = mi
+
+
+## After the window changes size the bricks keep their columns but stretch to the new width.
+func relayout_bricks() -> void:
+	set_brick_size()
+	var left := (W - (COLS * BW + (COLS - 1) * GAP)) / 2.0
+	for b in bricks:
+		if b.kind == K_BOSS:
+			continue
+		b.rect = Rect2(left + b.col * (BW + GAP), b.rect.position.y, BW, BH)
+		b.mat.set_shader_parameter("size", brick_mesh.size)
+		b.node.queue_free()
+		make_brick_node(b)
+
+
+## The 3D scene is centred on the field, so these only need their game-space x kept in step.
+## The paddle and balls follow the field centre.
 
 
 ## The paddle gets narrower on every level.
@@ -1059,10 +1085,7 @@ func on_resized() -> void:
 		return
 	var dx := (new_w - W) / 2.0
 	W = new_w
-	for k in bricks:
-		if k.kind != K_BOSS:
-			k.rect.position.x += dx
-			k.node.position.x += dx * S
+	relayout_bricks()
 	for b in balls:
 		b.pos.x += dx
 		for i in b.trail.size():
@@ -1236,6 +1259,14 @@ func play(sound: String, pitch := 1.0, vol_db := 0.0) -> void:
 # ---- Update
 func _process(delta: float) -> void:
 	var dt := minf(delta, 1.0 / 30.0)
+	if OS.has_feature("web"):
+		web_check_t += delta
+		if web_check_t > 0.4:
+			web_check_t = 0.0
+			# iOS Safari can report the new size late after a rotation; re-send the resize event
+			var js_portrait: Variant = JavaScriptBridge.eval("window.innerHeight > window.innerWidth")
+			if js_portrait is bool and js_portrait != is_portrait():
+				JavaScriptBridge.eval("window.dispatchEvent(new Event('resize'))")
 	probe_performance(delta)
 	if is_portrait() and state == State.PLAY:
 		state = State.PAUSED
