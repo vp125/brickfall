@@ -387,7 +387,7 @@ var paddle_w := PADDLE_W
 var wide_left := 0.0
 var mouse_active := false
 var shake := 0.0
-var web_check_t := 0.0
+var rotated_hint := false # set by shell.gd when the picture is turned for a portrait screen
 var PADDLE_Y := H - 44.0 # raised on touch layouts so a thumb and the home bar stay clear
 
 var _font: Font
@@ -1259,14 +1259,6 @@ func play(sound: String, pitch := 1.0, vol_db := 0.0) -> void:
 # ---- Update
 func _process(delta: float) -> void:
 	var dt := minf(delta, 1.0 / 30.0)
-	if OS.has_feature("web"):
-		web_check_t += delta
-		if web_check_t > 0.4:
-			web_check_t = 0.0
-			# iOS Safari can report the new size late after a rotation; re-send the resize event
-			var js_portrait: Variant = JavaScriptBridge.eval("window.innerHeight > window.innerWidth")
-			if js_portrait is bool and js_portrait != is_portrait():
-				JavaScriptBridge.eval("window.dispatchEvent(new Event('resize'))")
 	probe_performance(delta)
 	if is_portrait() and state == State.PLAY:
 		state = State.PAUSED
@@ -1972,6 +1964,8 @@ func _draw() -> void:
 			glow_text("LEVEL %d  -  %s" % [level + 1, String(LEVELS[level]["name"]).to_upper()], H / 2.0 + 40.0, 36, CYAN, HORIZONTAL_ALIGNMENT_CENTER)
 			text(String(LEVELS[level]["info"]), H / 2.0 + 76.0, 16, INK, HORIZONTAL_ALIGNMENT_CENTER)
 			text("Paddle %d%%   -   Ball speed %.1fx" % [roundi(100.0 * base_paddle_w() / PADDLE_W), speed / SPEED_START], H / 2.0 + 102.0, 14, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
+			if rotated_hint:
+				text("Turn your phone clockwise so the game is upright", H / 2.0 + 130.0, 15, ACCENT, HORIZONTAL_ALIGNMENT_CENTER)
 			if audio_loading:
 				text("Loading sound... %d%%" % roundi(Synth.progress * 100.0), H - 86.0, 13, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 			if not scores.is_empty():
