@@ -384,6 +384,8 @@ var drops: Array[Drop] = []
 var parts: Array[Part] = []
 var paddle_x := W / 2.0
 var paddle_w := PADDLE_W
+var paddle_synced_w := -1.0 # width the paddle meshes were last built for
+var paddle_synced_wide := false
 var wide_left := 0.0
 var mouse_active := false
 var shake := 0.0
@@ -500,10 +502,32 @@ func _ready() -> void:
 	setup_audio()
 	AudioServer.set_bus_mute(0, muted)
 	set_quality(low_quality, false)
+	prewarm_effects()
 	new_game()
 	if start_level > 0:
 		level = start_level
 		load_level()
+
+
+## Draws every effect shader once, too small to see, so the web build compiles them while
+## loading instead of hitching on the first brick that breaks.
+func prewarm_effects() -> void:
+	var holder := Node3D.new()
+	holder.scale = Vector3.ONE * 0.001
+	world.add_child(holder)
+	var mats: Array = shard_mats.duplicate()
+	var rm := ShaderMaterial.new()
+	rm.shader = ring_shader
+	rm.set_shader_parameter("size", Vector2(1, 1))
+	mats.append(rm)
+	mats.append(halo_mat(Color.WHITE, Vector2(1, 1), 0.03, 0.6, 1.0))
+	for i in mats.size():
+		var mi := MeshInstance3D.new()
+		mi.mesh = shard_meshes[i % shard_meshes.size()] if i < shard_mats.size() else plane(Vector2(1, 1))
+		mi.material_override = mats[i]
+		mi.position = Vector3(0, 0.3, 0)
+		holder.add_child(mi)
+	get_tree().create_timer(0.5).timeout.connect(holder.queue_free)
 
 
 # Auto-pause when the app loses focus (incoming call, app switch, window deselected).
@@ -1826,14 +1850,19 @@ func burst(k: Brick) -> void:
 func sync_3d(dt: float) -> void:
 	paddle_node.position = to3(Vector2(paddle_x, PADDLE_Y + PADDLE_H / 2.0), 0.25)
 	# resize the quad (not scale it) so the bevel stays the same width when widened
-	paddle_mesh.size = Vector2(paddle_w * S, PADDLE_H * S + 0.04)
-	paddle_mat.set_shader_parameter("size", paddle_mesh.size)
-	paddle_halo_mesh.size = paddle_mesh.size + Vector2(1.0, 1.0)
-	paddle_halo_mat.set_shader_parameter("size", paddle_mesh.size)
-	paddle_halo_mat.set_shader_parameter("base_col", CYAN if wide_left > 0.0 else Color("7fdcff"))
-	paddle_shadow_mesh.size = paddle_mesh.size + Vector2(0.06, 0.06)
-	paddle_shadow_mat.set_shader_parameter("size", paddle_shadow_mesh.size)
-	paddle_mat.set_shader_parameter("base_col", CYAN if wide_left > 0.0 else INK)
+	# the meshes are rebuilt only when the width or the widened state actually changes
+	var wide := wide_left > 0.0
+	if paddle_w != paddle_synced_w or wide != paddle_synced_wide:
+		paddle_synced_w = paddle_w
+		paddle_synced_wide = wide
+		paddle_mesh.size = Vector2(paddle_w * S, PADDLE_H * S + 0.04)
+		paddle_mat.set_shader_parameter("size", paddle_mesh.size)
+		paddle_halo_mesh.size = paddle_mesh.size + Vector2(1.0, 1.0)
+		paddle_halo_mat.set_shader_parameter("size", paddle_mesh.size)
+		paddle_halo_mat.set_shader_parameter("base_col", CYAN if wide else Color("7fdcff"))
+		paddle_shadow_mesh.size = paddle_mesh.size + Vector2(0.06, 0.06)
+		paddle_shadow_mat.set_shader_parameter("size", paddle_shadow_mesh.size)
+		paddle_mat.set_shader_parameter("base_col", CYAN if wide else INK)
 
 	for b in balls:
 		b.node.position = to3(b.pos, BALL_R * S + 0.03)
