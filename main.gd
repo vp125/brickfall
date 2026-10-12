@@ -382,6 +382,7 @@ var bricks: Array[Brick] = []
 var balls: Array[Ball] = []
 var drops: Array[Drop] = []
 var parts: Array[Part] = []
+var shard_pool: Array[MeshInstance3D] = []
 var paddle_x := W / 2.0
 var paddle_w := PADDLE_W
 var paddle_synced_w := -1.0 # width the paddle meshes were last built for
@@ -503,10 +504,43 @@ func _ready() -> void:
 	AudioServer.set_bus_mute(0, muted)
 	set_quality(low_quality, false)
 	prewarm_effects()
+	fill_shard_pool(110)
 	new_game()
 	if start_level > 0:
 		level = start_level
 		load_level()
+
+
+## Shards are recycled instead of created and freed on every break, which is what made
+## chain explosions hitch: a pool of hidden nodes is filled at startup.
+func take_shard(mesh: Mesh) -> MeshInstance3D:
+	var mi: MeshInstance3D
+	if shard_pool.is_empty():
+		mi = MeshInstance3D.new()
+		world.add_child(mi)
+	else:
+		mi = shard_pool.pop_back()
+	mi.mesh = mesh
+	mi.rotation = Vector3.ZERO
+	mi.scale = Vector3.ONE * 0.001
+	mi.visible = true
+	return mi
+
+
+func release_part(p: Part) -> void:
+	if p.flash:
+		p.node.queue_free()
+	else:
+		p.node.visible = false
+		shard_pool.append(p.node)
+
+
+func fill_shard_pool(n: int) -> void:
+	for i in n:
+		var mi := MeshInstance3D.new()
+		mi.visible = false
+		world.add_child(mi)
+		shard_pool.append(mi)
 
 
 ## Draws every effect shader once, too small to see, so the web build compiles them while
@@ -789,7 +823,7 @@ func clear_dynamic() -> void:
 		d.node.queue_free()
 	drops.clear()
 	for p in parts:
-		p.node.queue_free()
+		release_part(p)
 	parts.clear()
 
 
@@ -1385,7 +1419,7 @@ func update(dt: float) -> void:
 			p.hv -= 14.0 * dt
 		p.life -= dt
 		if p.life <= 0.0:
-			p.node.queue_free()
+			release_part(p)
 		else:
 			kept_parts.append(p)
 	parts = kept_parts
@@ -1655,10 +1689,8 @@ func shot_pop(pos: Vector2) -> void:
 		p.max_life = p.life
 		p.size = 0.6 + randf() * 0.5
 		p.spin = Vector3(randf_range(-12, 12), randf_range(-12, 12), randf_range(-12, 12))
-		var mi := MeshInstance3D.new()
-		mi.mesh = shard_meshes[i % shard_meshes.size()]
+		var mi := take_shard(shard_meshes[i % shard_meshes.size()])
 		mi.material_override = shard_mats[0]
-		world.add_child(mi)
 		p.node = mi
 		parts.append(p)
 
@@ -1717,11 +1749,9 @@ func layer_break(k: Brick) -> void:
 		p.max_life = p.life
 		p.size = 0.8 + randf() * 0.7
 		p.spin = Vector3(randf_range(-9, 9), randf_range(-9, 9), randf_range(-9, 9))
-		var mi := MeshInstance3D.new()
-		mi.mesh = shard_meshes[i % shard_meshes.size()]
+		var mi := take_shard(shard_meshes[i % shard_meshes.size()])
 		mi.material_override = shard_mats[8]
 		mi.rotation = Vector3(randf() * TAU, randf() * TAU, randf() * TAU)
-		world.add_child(mi)
 		p.node = mi
 		parts.append(p)
 
@@ -1838,11 +1868,9 @@ func burst(k: Brick) -> void:
 		p.max_life = p.life
 		p.size = 0.7 + randf() * 1.1
 		p.spin = Vector3(randf_range(-14, 14), randf_range(-14, 14), randf_range(-14, 14))
-		var mi := MeshInstance3D.new()
-		mi.mesh = shard_meshes[i % shard_meshes.size()]
+		var mi := take_shard(shard_meshes[i % shard_meshes.size()])
 		mi.material_override = shard_mats[6 if k.kind == K_BOMB else k.row]
 		mi.rotation = Vector3(randf() * TAU, randf() * TAU, randf() * TAU)
-		world.add_child(mi)
 		p.node = mi
 		parts.append(p)
 
