@@ -106,7 +106,7 @@ const MAX_BOUNCE_DEG := 62.0
 const LIVES_START := 3
 const DROP_CHANCE := 0.18
 const TRAIL_LEN := 8
-const GLOW := 0.33 # master glow level: 1.0 = full neon, lower = subtler
+const GLOW := 0.22 # master glow level: 1.0 = full neon, lower = subtler
 
 const INK := Color("e8f4ff")
 const MUTED := Color("7f8fb8")
