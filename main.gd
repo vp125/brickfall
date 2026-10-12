@@ -676,6 +676,8 @@ func build_world() -> void:
 	add_strip(Vector2(0.16, depth + 0.2), Vector3(-W / 2.0 * S + 0.08, 0.1, mid_z), MAGENTA)
 	add_strip(Vector2(0.16, depth + 0.2), Vector3(W / 2.0 * S - 0.08, 0.1, mid_z), CYAN)
 	add_strip(Vector2(W * S + 0.32, 0.16), Vector3(0, 0.1, top_z + 0.08), MAGENTA.lerp(CYAN, 0.5))
+	# bottom line: only a visual (a danger line), the ball still falls through it and costs a life
+	add_strip(Vector2(W * S + 0.32, 0.16), Vector3(0, 0.1, H / 2.0 * S - 0.08), Color("ff2e63"))
 
 	# shared meshes and materials
 	brick_mesh = plane(Vector2(BW * S - 0.04, BH * S - 0.04))
