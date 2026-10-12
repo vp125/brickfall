@@ -72,11 +72,11 @@ const LEVELS := [
 # (breaks in one hit and destroys every breakable brick touching it, chaining into other X).
 
 # ---- Constants
-const W := 800.0
+var W := 800.0 # field width in game px: follows the window, so wide phones get a wide field
 const H := 600.0
 const S := 0.02 # game px -> 3D units
 const COLS := 10
-const BW := 68.0
+var BW := 68.0 # brick width: recomputed per level so the brick grid spans the field
 const BH := 22.0
 const GAP := 6.0
 const TOP := 76.0
@@ -114,8 +114,6 @@ const ACCENT := Color("ffc145")
 const CYAN := Color("22d3ee")
 const MAGENTA := Color("ff2e9a")
 const HUD_BG := Color(0.03, 0.04, 0.09, 0.88)
-const PAUSE_BTN := Rect2(228, 2, 44, 36) # tap target in the HUD, 44px wide for fingers
-const SOUND_BTN := Rect2(278, 2, 44, 36)
 const Synth := preload("res://audio_synth.gd")
 
 const FLOOR_SHADER := """
@@ -403,6 +401,7 @@ var armor_mat: ShaderMaterial
 var bomb_mat: ShaderMaterial
 var armor_halo_mat: ShaderMaterial
 var bomb_halo_mat: ShaderMaterial
+var rail_nodes: Array[MeshInstance3D] = []
 var shape_shader: Shader
 var crystal_shader: Shader
 var shard_shader: Shader
@@ -440,7 +439,6 @@ var audio_loading := false
 var muted := false
 # mobile / quality
 const SETTINGS_PATH := "user://brickfall.cfg"
-const QUALITY_BTN := Rect2(260, 370, 280, 52)
 const TOUCH_GAIN := 1.35 # finger travel -> paddle travel
 var mobile_ui := false # bigger buttons and a raised paddle
 var touch_mode := false # relative drag control once a real touch is seen
@@ -465,7 +463,6 @@ var boss_halo_mat: ShaderMaterial
 # high scores (top 10, saved in user://brickfall.cfg)
 const SCORES_MAX := 10
 const LETTERS := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-const NAME_OK_BTN := Rect2(320, 400, 160, 52)
 var scores: Array = [] # [{name, score, level}, ...] best first
 var last_name := "AAA"
 var name_idx := [0, 0, 0]
@@ -494,6 +491,8 @@ func _ready() -> void:
 			shot_frame = int(a.substr(8))
 		elif a.begins_with("--level="):
 			start_level = clampi(int(a.substr(8)) - 1, 0, LEVELS.size() - 1)
+	W = get_viewport().get_visible_rect().size.x
+	get_viewport().size_changed.connect(on_resized)
 	build_world()
 	setup_audio()
 	AudioServer.set_bus_mute(0, muted)
@@ -608,7 +607,23 @@ func add_strip(size: Vector2, pos: Vector3, col: Color) -> void:
 	mi.material_override = shape_mat(col, size, r, r, 1.8)
 	mi.position = pos
 	world.add_child(mi)
+	rail_nodes.append(mi)
 	add_halo(mi, size, halo_mat(col, size, r, 0.5, 1.4), 0.5)
+
+
+## Neon rails along the left, right and top edges, plus a red danger line along the bottom.
+func build_rails() -> void:
+	for n in rail_nodes:
+		n.queue_free()
+	rail_nodes.clear()
+	var top_z := (40.0 - H / 2.0) * S
+	var depth := (H - 40.0) * S
+	var mid_z := top_z + depth / 2.0
+	add_strip(Vector2(0.16, depth + 0.2), Vector3(-W / 2.0 * S + 0.08, 0.1, mid_z), MAGENTA)
+	add_strip(Vector2(0.16, depth + 0.2), Vector3(W / 2.0 * S - 0.08, 0.1, mid_z), CYAN)
+	add_strip(Vector2(W * S + 0.32, 0.16), Vector3(0, 0.1, top_z + 0.08), MAGENTA.lerp(CYAN, 0.5))
+	# bottom line: only a visual (a danger line), the ball still falls through it and costs a life
+	add_strip(Vector2(W * S + 0.32, 0.16), Vector3(0, 0.1, H / 2.0 * S - 0.08), Color("ff2e63"))
 
 
 func build_world() -> void:
@@ -669,15 +684,7 @@ func build_world() -> void:
 	floor_node.position = Vector3(0, -0.02, 0)
 	world.add_child(floor_node)
 
-	# neon rails along the left, right and top edges
-	var top_z := (40.0 - H / 2.0) * S
-	var depth := (H - 40.0) * S
-	var mid_z := top_z + depth / 2.0
-	add_strip(Vector2(0.16, depth + 0.2), Vector3(-W / 2.0 * S + 0.08, 0.1, mid_z), MAGENTA)
-	add_strip(Vector2(0.16, depth + 0.2), Vector3(W / 2.0 * S - 0.08, 0.1, mid_z), CYAN)
-	add_strip(Vector2(W * S + 0.32, 0.16), Vector3(0, 0.1, top_z + 0.08), MAGENTA.lerp(CYAN, 0.5))
-	# bottom line: only a visual (a danger line), the ball still falls through it and costs a life
-	add_strip(Vector2(W * S + 0.32, 0.16), Vector3(0, 0.1, H / 2.0 * S - 0.08), Color("ff2e63"))
+	build_rails()
 
 	# shared meshes and materials
 	brick_mesh = plane(Vector2(BW * S - 0.04, BH * S - 0.04))
@@ -794,8 +801,23 @@ func new_game() -> void:
 	load_level()
 
 
+## Recomputes the brick width so ten columns span the field, and resizes every brick material.
+func set_brick_size() -> void:
+	BW = floorf((W - 68.0 - (COLS - 1) * GAP) / COLS)
+	var sz := Vector2(BW * S - 0.04, BH * S - 0.04)
+	brick_mesh.size = sz
+	brick_shadow_mesh.size = sz + Vector2(0.06, 0.06)
+	for m in row_mats:
+		m.set_shader_parameter("size", sz)
+	for m in halo_row_mats:
+		m.set_shader_parameter("size", sz)
+	for m in [armor_mat, bomb_mat, armor_halo_mat, bomb_halo_mat]:
+		m.set_shader_parameter("size", sz)
+
+
 func load_level() -> void:
 	clear_dynamic()
+	set_brick_size()
 	var left := (W - (COLS * BW + (COLS - 1) * GAP)) / 2.0
 	var rows: Array = LEVELS[level]["rows"]
 	for r in rows.size():
@@ -881,6 +903,8 @@ func reset_serve() -> void:
 func _input(event: InputEvent) -> void:
 	if (event is InputEventMouseButton or event is InputEventKey) and event.pressed:
 		unlock_audio() # browsers and phones only allow sound after a first tap or key press
+		if is_portrait():
+			return
 	if state == State.NAME:
 		if event is InputEventKey and event.pressed and not event.echo:
 			name_key(event)
@@ -905,7 +929,7 @@ func _input(event: InputEvent) -> void:
 			toggle_pause()
 		elif sound_rect().has_point(m):
 			toggle_mute()
-		elif state == State.PAUSED and QUALITY_BTN.has_point(m):
+		elif state == State.PAUSED and quality_rect().has_point(m):
 			quality_chosen = true
 			set_quality(not low_quality)
 		else:
@@ -985,7 +1009,7 @@ func name_key(event: InputEventKey) -> void:
 
 
 func name_slot_x(i: int) -> float:
-	return 300.0 + 100.0 * i
+	return W / 2.0 - 100.0 + 100.0 * i
 
 
 func name_click(m: Vector2) -> void:
@@ -1000,18 +1024,70 @@ func name_click(m: Vector2) -> void:
 		if Rect2(cx - 45, 267, 90, 78).has_point(m):
 			name_slot = i
 			return
-	if NAME_OK_BTN.has_point(m):
+	if name_ok_rect().has_point(m):
 		submit_name()
 
 
 # ---- Layout, settings and quality
 ## Touch layouts get larger tap targets that reach below the HUD bar.
 func pause_rect() -> Rect2:
-	return Rect2(172, 0, 80, 72) if mobile_ui else PAUSE_BTN
+	return Rect2(W / 2.0 - 228.0, 0, 80, 72) if mobile_ui else Rect2(W / 2.0 - 172.0, 2, 44, 36)
 
 
 func sound_rect() -> Rect2:
-	return Rect2(256, 0, 80, 72) if mobile_ui else SOUND_BTN
+	return Rect2(W / 2.0 - 144.0, 0, 80, 72) if mobile_ui else Rect2(W / 2.0 - 122.0, 2, 44, 36)
+
+
+func quality_rect() -> Rect2:
+	return Rect2(W / 2.0 - 140.0, 370, 280, 52)
+
+
+func name_ok_rect() -> Rect2:
+	return Rect2(W / 2.0 - 80.0, 400, 160, 52)
+
+
+## True when the window is taller than wide (a phone held upright).
+func is_portrait() -> bool:
+	var v := get_viewport().get_visible_rect().size
+	return v.y > v.x
+
+
+## The window changed size. Re-centre everything that already exists and rebuild the rails.
+func on_resized() -> void:
+	var new_w := get_viewport().get_visible_rect().size.x
+	if is_equal_approx(new_w, W):
+		return
+	var dx := (new_w - W) / 2.0
+	W = new_w
+	for k in bricks:
+		if k.kind != K_BOSS:
+			k.rect.position.x += dx
+			k.node.position.x += dx * S
+	for b in balls:
+		b.pos.x += dx
+		for i in b.trail.size():
+			b.trail[i].x += dx
+	for d in drops:
+		d.pos.x += dx
+	for sh in shots:
+		sh.pos.x += dx
+	paddle_x += dx
+	if not rail_nodes.is_empty():
+		build_rails()
+
+
+func draw_rotate_prompt() -> void:
+	var v := get_viewport().get_visible_rect().size
+	draw_rect(Rect2(Vector2.ZERO, v), Color("070a14"))
+	var c := v / 2.0
+	# a phone outline with a curved arrow showing the turn
+	draw_rect(Rect2(c.x - 34, c.y - 150, 68, 118), Color(CYAN, 0.9), false, 5.0)
+	draw_rect(Rect2(c.x - 10, c.y - 142, 20, 4), Color(CYAN, 0.9))
+	draw_arc(c + Vector2(0, -92), 92.0, deg_to_rad(-25.0), deg_to_rad(60.0), 24, Color(ACCENT, 0.95), 6.0)
+	var tip := c + Vector2(0, -92) + Vector2.from_angle(deg_to_rad(60.0)) * 92.0
+	draw_colored_polygon(PackedVector2Array([tip + Vector2(-16, -14), tip + Vector2(14, -18), tip + Vector2(2, 18)]), ACCENT)
+	glow_text("Turn your phone sideways", c.y + 70.0, 44, INK, HORIZONTAL_ALIGNMENT_CENTER, 0.0, v.x)
+	text("Brickfall plays in landscape", c.y + 112.0, 26, MUTED, HORIZONTAL_ALIGNMENT_CENTER, 0.0, v.x)
 
 
 func load_settings() -> void:
@@ -1161,6 +1237,8 @@ func play(sound: String, pitch := 1.0, vol_db := 0.0) -> void:
 func _process(delta: float) -> void:
 	var dt := minf(delta, 1.0 / 30.0)
 	probe_performance(delta)
+	if is_portrait() and state == State.PLAY:
+		state = State.PAUSED
 	if state != State.PAUSED:
 		update(dt)
 	sync_3d(dt)
@@ -1872,12 +1950,14 @@ func _draw() -> void:
 			glow_text("LEVEL CLEAR", H / 2.0 + 10.0, 56, Color("39ff88"), HORIZONTAL_ALIGNMENT_CENTER)
 		State.PAUSED:
 			banner("PAUSED", "Tap or press Space to resume", 0.55, CYAN)
-			draw_rect(QUALITY_BTN, Color(1, 1, 1, 0.07))
-			draw_rect(QUALITY_BTN, Color(CYAN, 0.7), false, 2.0)
-			text("GRAPHICS: %s  (tap to change)" % ("LOW" if low_quality else "HIGH"), QUALITY_BTN.position.y + 32.0, 17, INK, HORIZONTAL_ALIGNMENT_CENTER, QUALITY_BTN.position.x, QUALITY_BTN.size.x)
+			draw_rect(quality_rect(), Color(1, 1, 1, 0.07))
+			draw_rect(quality_rect(), Color(CYAN, 0.7), false, 2.0)
+			text("GRAPHICS: %s  (tap to change)" % ("LOW" if low_quality else "HIGH"), quality_rect().position.y + 32.0, 17, INK, HORIZONTAL_ALIGNMENT_CENTER, quality_rect().position.x, quality_rect().size.x)
 		State.OVER: end_screen("GAME OVER", Color("ff2e63"))
 		State.WIN: end_screen("YOU WIN", Color("39ff88"))
 		State.NAME: name_screen()
+	if is_portrait():
+		draw_rotate_prompt()
 
 
 func end_screen(title: String, color: Color) -> void:
@@ -1889,14 +1969,15 @@ func end_screen(title: String, color: Color) -> void:
 		text("No scores yet", 258.0, 16, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 	for i in mini(8, scores.size()):
 		var y := 252.0 + i * 27.0
+		var ox := W / 2.0 - 400.0
 		var e: Dictionary = scores[i]
 		var hot := i == new_rank
 		var c := ACCENT if hot else INK
 		var fn := glow_text if hot else text
-		fn.call("%d." % (i + 1), y, 19, MUTED, HORIZONTAL_ALIGNMENT_LEFT, 260.0, 60.0)
-		fn.call(String(e["name"]), y, 19, c, HORIZONTAL_ALIGNMENT_LEFT, 320.0, 80.0)
-		fn.call("L%d" % int(e["level"]), y, 16, MUTED, HORIZONTAL_ALIGNMENT_LEFT, 400.0, 60.0)
-		fn.call("%06d" % int(e["score"]), y, 19, c, HORIZONTAL_ALIGNMENT_RIGHT, 440.0, 100.0)
+		fn.call("%d." % (i + 1), y, 19, MUTED, HORIZONTAL_ALIGNMENT_LEFT, 260.0 + ox, 60.0)
+		fn.call(String(e["name"]), y, 19, c, HORIZONTAL_ALIGNMENT_LEFT, 320.0 + ox, 80.0)
+		fn.call("L%d" % int(e["level"]), y, 16, MUTED, HORIZONTAL_ALIGNMENT_LEFT, 400.0 + ox, 60.0)
+		fn.call("%06d" % int(e["score"]), y, 19, c, HORIZONTAL_ALIGNMENT_RIGHT, 440.0 + ox, 100.0)
 	glow_text("Tap or press Space to play again", H - 56.0, 17, INK, HORIZONTAL_ALIGNMENT_CENTER)
 
 
@@ -1915,9 +1996,9 @@ func name_screen() -> void:
 		draw_rect(Rect2(cx - 38, 262, 76, 90), Color(1, 1, 1, 0.07))
 		draw_rect(Rect2(cx - 38, 262, 76, 90), Color(col, 0.8 if on else 0.35), false, 2.0)
 		glow_text(LETTERS[name_idx[i]], 334.0, 66, col, HORIZONTAL_ALIGNMENT_CENTER, cx - 38.0, 76.0)
-	draw_rect(NAME_OK_BTN, Color(ACCENT, 0.12))
-	draw_rect(NAME_OK_BTN, Color(ACCENT, 0.9), false, 2.0)
-	glow_text("SAVE", NAME_OK_BTN.position.y + 35.0, 24, ACCENT, HORIZONTAL_ALIGNMENT_CENTER, NAME_OK_BTN.position.x, NAME_OK_BTN.size.x)
+	draw_rect(name_ok_rect(), Color(ACCENT, 0.12))
+	draw_rect(name_ok_rect(), Color(ACCENT, 0.9), false, 2.0)
+	glow_text("SAVE", name_ok_rect().position.y + 35.0, 24, ACCENT, HORIZONTAL_ALIGNMENT_CENTER, name_ok_rect().position.x, name_ok_rect().size.x)
 	text("Type letters or use the arrows  -  Enter to save", H - 56.0, 14, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 
 
