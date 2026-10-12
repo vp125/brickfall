@@ -392,6 +392,13 @@ var paddle_synced_wide := false
 var wide_left := 0.0
 var mouse_active := false
 var shake := 0.0
+var perf_frame := 60
+var dbg_on := false # ?debug in the web link: show frame timing under the HUD
+var dbg_t := 0.0
+var dbg_delta := 0.0 # worst frame time / worst script time in the current 2 s window
+var dbg_script := 0.0
+var dbg_shown := ""
+var perf_test := false # --perf: trigger a chain explosion and print slow frames
 var rotated_hint := false # set by shell.gd when the picture is turned for a portrait screen
 var PADDLE_Y := H - 44.0 # raised on touch layouts so a thumb and the home bar stay clear
 
@@ -493,12 +500,20 @@ func _ready() -> void:
 			mobile_ui = true
 		elif a == "--low":
 			low_quality = true
+		elif a == "--perf":
+			perf_test = true
 		elif a.begins_with("--shot="):
 			shot_path = a.substr(7)
 		elif a.begins_with("--frame="):
 			shot_frame = int(a.substr(8))
 		elif a.begins_with("--level="):
 			start_level = clampi(int(a.substr(8)) - 1, 0, LEVELS.size() - 1)
+	if OS.has_feature("web") and JavaScriptBridge.eval("location.search.indexOf('perf') >= 0") == true:
+		perf_test = true
+		perf_frame = 500
+		start_level = 5
+	if OS.has_feature("web") and JavaScriptBridge.eval("location.search.indexOf('debug') >= 0") == true:
+		dbg_on = true
 	W = get_viewport().get_visible_rect().size.x
 	get_viewport().size_changed.connect(on_resized)
 	build_world()
@@ -1365,12 +1380,33 @@ func play(sound: String, pitch := 1.0, vol_db := 0.0) -> void:
 # ---- Update
 func _process(delta: float) -> void:
 	var dt := minf(delta, 1.0 / 30.0)
+	var dbg_t0 := Time.get_ticks_usec()
+	if perf_test:
+		if frame_i == perf_frame:
+			state = State.PLAY
+			for b in bricks:
+				if b.kind == K_BOMB:
+					break_brick(b)
+					break
+		if frame_i > 40 and (delta > 0.025 or frame_i == perf_frame):
+			print("frame ", frame_i, " delta_ms=", snappedf(delta * 1000.0, 0.1), " parts=", parts.size())
+		if frame_i == perf_frame + 80 and not OS.has_feature("web"):
+			get_tree().quit()
 	probe_performance(delta)
 	if is_portrait() and state == State.PLAY:
 		state = State.PAUSED
 	if state != State.PAUSED:
 		update(dt)
 	sync_3d(dt)
+	if dbg_on:
+		dbg_script = maxf(dbg_script, (Time.get_ticks_usec() - dbg_t0) / 1000.0)
+		dbg_delta = maxf(dbg_delta, delta * 1000.0)
+		dbg_t += delta
+		if dbg_t >= 2.0:
+			dbg_shown = "worst frame %.0f ms   script %.1f ms   shards %d   sounds %d" % [dbg_delta, dbg_script, parts.size(), sfx_players.filter(func(q): return q.playing).size()]
+			dbg_t = 0.0
+			dbg_delta = 0.0
+			dbg_script = 0.0
 	# music sits lower when the game is not in active play
 	var music_target := -16.0 if (state == State.PLAY or state == State.READY or state == State.CLEARED) else -25.0
 	music_player.volume_db = lerpf(music_player.volume_db, music_target, minf(1.0, dt * 2.0))
@@ -1996,6 +2032,8 @@ func _draw() -> void:
 	draw_rect(Rect2(0, 39, W * 0.5, 2), Color(MAGENTA, 0.9))
 	draw_rect(Rect2(W * 0.5, 39, W * 0.5, 2), Color(CYAN, 0.9))
 
+	if dbg_on:
+		text(dbg_shown, 62, 14, Color("ffd24a"), HORIZONTAL_ALIGNMENT_CENTER)
 	text("SCORE", 27, 17, MUTED, HORIZONTAL_ALIGNMENT_LEFT, 16)
 	glow_text("%05d" % score, 27, 20, INK, HORIZONTAL_ALIGNMENT_LEFT, 82)
 	text("LEVEL %d  %s" % [level + 1, String(LEVELS[level]["name"]).to_upper()], 27, 17, MUTED, HORIZONTAL_ALIGNMENT_CENTER)
