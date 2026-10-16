@@ -1036,6 +1036,10 @@ func _input(event: InputEvent) -> void:
 			paddle_x += event.relative.x * TOUCH_GAIN
 	elif event is InputEventMouseMotion:
 		mouse_active = true
+		# a real mouse (not one emulated from touch) takes control back from touch mode
+		if touch_mode and event.device != InputEvent.DEVICE_ID_EMULATION:
+			touch_mode = false
+			mobile_ui = OS.has_feature("mobile")
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		mouse_active = true
 		# Touch is emulated as mouse input, so taps and clicks share this path.
@@ -1377,7 +1381,7 @@ func _process(delta: float) -> void:
 		dbg_delta = maxf(dbg_delta, delta * 1000.0)
 		dbg_t += delta
 		if dbg_t >= 2.0:
-			dbg_shown = "worst frame %.0f ms   script %.1f ms   shards %d   sounds %d" % [dbg_delta, dbg_script, parts.size(), sfx_players.filter(func(q): return q.playing).size()]
+			dbg_shown = "worst frame %.0f ms   script %.1f ms   shards %d   input %s" % [dbg_delta, dbg_script, parts.size(), "TOUCH" if touch_mode else ("mouse" if mouse_active else "idle")]
 			dbg_t = 0.0
 			dbg_delta = 0.0
 			dbg_script = 0.0
