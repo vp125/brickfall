@@ -8,6 +8,7 @@ extends RefCounted
 ##    yield to the next frame whenever that many milliseconds have been spent, so the game
 ##    keeps running while the sound loads. `progress` goes 0..1 while building.
 
+const AUDIO_PAD := 64 # extra samples after each buffer, see to_wav
 const SR := 22050 # sound effects
 const MUSIC_SR := 11025 # ambient loop (soft pads, so a lower rate is fine)
 
@@ -41,11 +42,18 @@ static func to_wav(data: PackedFloat32Array, rate: int, loop := false) -> AudioS
 		peak = maxf(peak, absf(v))
 	var gain := 0.9 / peak if peak > 0.9 else 1.0
 	var bytes := PackedByteArray()
-	bytes.resize(data.size() * 2)
-	for i in data.size():
+	# The mixer reads a few samples past the end (interpolation, loop wrap). Android guards the
+	# memory right after a big buffer, so without padding the app crashes when the music loops.
+	# Padding with the start of the loop keeps the wrap seamless; silence pads one-shot sounds.
+	var n := data.size()
+	bytes.resize((n + AUDIO_PAD) * 2)
+	for i in n:
 		bytes.encode_s16(i * 2, int(clampf(data[i] * gain, -1.0, 1.0) * 32767.0))
 		if i % 4096 == 0:
 			await tick()
+	if loop:
+		for i in AUDIO_PAD:
+			bytes.encode_s16((n + i) * 2, int(clampf(data[i % n] * gain, -1.0, 1.0) * 32767.0))
 	var w := AudioStreamWAV.new()
 	w.format = AudioStreamWAV.FORMAT_16_BITS
 	w.mix_rate = rate
@@ -54,7 +62,7 @@ static func to_wav(data: PackedFloat32Array, rate: int, loop := false) -> AudioS
 	if loop:
 		w.loop_mode = AudioStreamWAV.LOOP_FORWARD
 		w.loop_begin = 0
-		w.loop_end = data.size()
+		w.loop_end = n
 	return w
 
 
