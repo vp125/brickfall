@@ -1,4 +1,4 @@
-# Brickfall
+# Shardfall
 
 A neon crystal Breakout game made with Godot 4. No art or audio files: every visual is drawn with shaders and every sound is synthesised at startup.
 

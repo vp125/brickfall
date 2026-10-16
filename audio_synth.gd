@@ -1,5 +1,5 @@
 extends RefCounted
-## Procedural audio for Brickfall: every sound effect and the ambient music loop are
+## Procedural audio for Shardfall: every sound effect and the ambient music loop are
 ## synthesised from sine waves and noise at startup, so the project ships no audio files.
 ##
 ## Synthesis is slow, so it can run two ways:

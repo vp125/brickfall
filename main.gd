@@ -1,5 +1,5 @@
 extends Node2D
-## Brickfall: Breakout with a neon 3D look. Game logic runs on a flat 800x600 field;
+## Shardfall: Breakout with a neon 3D look. Game logic runs on a flat 800x600 field;
 ## the 3D scene (bricks, ball, paddle, floor) is built in code and mirrors that field.
 ## The 2D layer on top draws the HUD and overlays. No external assets.
 
@@ -1214,7 +1214,7 @@ func draw_rotate_prompt() -> void:
 	var tip := c + Vector2(0, -92) + Vector2.from_angle(deg_to_rad(60.0)) * 92.0
 	draw_colored_polygon(PackedVector2Array([tip + Vector2(-16, -14), tip + Vector2(14, -18), tip + Vector2(2, 18)]), ACCENT)
 	glow_text("Turn your phone sideways", c.y + 70.0, 44, INK, HORIZONTAL_ALIGNMENT_CENTER, 0.0, v.x)
-	text("Brickfall plays in landscape", c.y + 112.0, 26, MUTED, HORIZONTAL_ALIGNMENT_CENTER, 0.0, v.x)
+	text("Shardfall plays in landscape", c.y + 112.0, 26, MUTED, HORIZONTAL_ALIGNMENT_CENTER, 0.0, v.x)
 
 
 func load_settings() -> void:
