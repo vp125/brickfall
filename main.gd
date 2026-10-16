@@ -375,6 +375,7 @@ var paddle_synced_wide := false
 var wide_left := 0.0
 var mouse_active := false
 var shake := 0.0
+var demo_mode := false
 var capture_seen := false # the browser has confirmed the pointer lock
 var capture_t := 0.0
 var stall_grace := 0.0 # seconds the ball stays frozen after a long frame
@@ -491,6 +492,9 @@ func _ready() -> void:
 			low_quality = true
 		elif a == "--perf":
 			perf_test = true
+		elif a == "--demo":
+			perf_test = true
+			demo_mode = true # fast, busy autoplay for recording trailers and covers
 		elif a.begins_with("--shot="):
 			shot_path = a.substr(7)
 		elif a.begins_with("--frame="):
@@ -1443,7 +1447,18 @@ func update(dt: float) -> void:
 		if state == State.READY and frame_i > 10:
 			launch()
 		elif state == State.PLAY and not balls.is_empty():
-			paddle_x = balls[0].pos.x + sin(frame_i * 0.05) * 40.0
+			if demo_mode:
+				var tgt := balls[0]
+				for b in balls:
+					if b.vel.y > 0.0 and (tgt.vel.y <= 0.0 or b.pos.y > tgt.pos.y):
+						tgt = b
+				paddle_x = tgt.pos.x + sin(frame_i * 0.07) * 18.0
+				speed = maxf(speed, 500.0)
+				lives = LIVES_START
+				if balls.size() < 4 and frame_i % 40 == 0:
+					apply_power("M")
+			else:
+				paddle_x = balls[0].pos.x + sin(frame_i * 0.05) * 40.0
 	paddle_x = clampf(paddle_x, paddle_w / 2.0, W - paddle_w / 2.0)
 
 	wide_left = maxf(0.0, wide_left - dt)
