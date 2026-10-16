@@ -375,6 +375,7 @@ var paddle_synced_wide := false
 var wide_left := 0.0
 var mouse_active := false
 var shake := 0.0
+var stall_grace := 0.0 # seconds the ball stays frozen after a long frame
 var perf_frame := 60
 var dbg_on := false # ?debug in the web link: show frame timing under the HUD
 var dbg_t := 0.0
@@ -1350,6 +1351,8 @@ func play(sound: String, pitch := 1.0, vol_db := 0.0) -> void:
 func _process(delta: float) -> void:
 	var dt := minf(delta, 1.0 / 30.0)
 	var dbg_t0 := Time.get_ticks_usec()
+	if delta > 0.05 and state == State.PLAY and shot_path == "" and not perf_test:
+		stall_grace = 0.18
 	if frame_i == 30 and OS.has_feature("web"):
 		# link flags (?debug, ?nosound, ?nofx), read a few frames in: a script call while the scene is
 		# still being built breaks the 3D view on the web
@@ -1359,15 +1362,9 @@ func _process(delta: float) -> void:
 			dbg_nosound = dbg_on and q.contains("nosound")
 			dbg_nofx = dbg_on and q.contains("nofx")
 	if perf_test:
-		if frame_i == perf_frame:
-			state = State.PLAY
-			for b in bricks:
-				if b.kind == K_BOMB:
-					break_brick(b)
-					break
-		if frame_i > 40 and (delta > 0.025 or frame_i == perf_frame):
+		if frame_i > 40 and delta > 0.022:
 			print("frame ", frame_i, " delta_ms=", snappedf(delta * 1000.0, 0.1), " parts=", parts.size())
-		if frame_i == perf_frame + 80 and not OS.has_feature("web"):
+		if frame_i == 2700 and not OS.has_feature("web"):
 			get_tree().quit()
 	probe_performance(delta)
 	if is_portrait() and state == State.PLAY:
@@ -1403,7 +1400,7 @@ func update(dt: float) -> void:
 		mouse_active = false
 	elif mouse_active and not touch_mode:
 		paddle_x = get_global_mouse_position().x
-	if shot_path != "":
+	if shot_path != "" or perf_test:
 		if state == State.READY and frame_i > 10:
 			launch()
 		elif state == State.PLAY and not balls.is_empty():
@@ -1422,8 +1419,12 @@ func update(dt: float) -> void:
 		balls[0].pos = Vector2(paddle_x, PADDLE_Y - BALL_R - 1.0)
 
 	if state == State.PLAY:
-		for b in balls:
-			move_ball(b, dt)
+		# after a long frame the ball waits a moment, so a stall never costs a life while the paddle catches up
+		if stall_grace > 0.0:
+			stall_grace -= dt
+		else:
+			for b in balls:
+				move_ball(b, dt)
 		var alive: Array[Ball] = []
 		for b in balls:
 			if b.pos.y - BALL_R < H:
