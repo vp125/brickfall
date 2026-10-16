@@ -375,6 +375,8 @@ var paddle_synced_wide := false
 var wide_left := 0.0
 var mouse_active := false
 var shake := 0.0
+var capture_seen := false # the browser has confirmed the pointer lock
+var capture_t := 0.0
 var stall_grace := 0.0 # seconds the ball stays frozen after a long frame
 var perf_frame := 60
 var dbg_on := false # ?debug in the web link: show frame timing under the HUD
@@ -440,6 +442,7 @@ var audio_loading := false
 var muted := false
 # mobile / quality
 const SETTINGS_PATH := "user://brickfall.cfg"
+const MOUSE_GAIN := 1.0 # paddle movement per unit of mouse movement while playing
 const TOUCH_GAIN := 1.35 # finger travel -> paddle travel
 var mobile_ui := false # bigger buttons and a raised paddle
 var touch_mode := false # relative drag control once a real touch is seen
@@ -1040,6 +1043,10 @@ func _input(event: InputEvent) -> void:
 		if touch_mode and event.device != InputEvent.DEVICE_ID_EMULATION:
 			touch_mode = false
 			mobile_ui = OS.has_feature("mobile")
+		if state == State.PLAY and not touch_mode:
+			# while playing the paddle moves by how far the mouse moved, so it keeps working
+			# when the pointer is locked and can never run out of window
+			paddle_x += event.relative.x * MOUSE_GAIN
 	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		mouse_active = true
 		# Touch is emulated as mouse input, so taps and clicks share this path.
@@ -1057,7 +1064,7 @@ func _input(event: InputEvent) -> void:
 		match event.keycode:
 			KEY_SPACE, KEY_ENTER, KEY_KP_ENTER:
 				act()
-			KEY_P:
+			KEY_P, KEY_ESCAPE:
 				toggle_pause()
 			KEY_M:
 				toggle_mute()
@@ -1255,6 +1262,33 @@ func probe_performance(raw_dt: float) -> void:
 		save_settings()
 
 
+## While playing with a mouse the pointer is locked to the window (no cursor to lose). Esc, which
+## the browser uses to release the lock, pauses the game; menus get the cursor back.
+func sync_mouse_capture(delta: float) -> void:
+	if mobile_ui or touch_mode or shot_path != "" or perf_test:
+		return
+	if state == State.PLAY:
+		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+			capture_seen = false
+			capture_t = 0.0
+		elif OS.has_feature("web"):
+			capture_t += delta
+			if capture_t > 0.3:
+				capture_t = 0.0
+				var locked: Variant = JavaScriptBridge.eval("!!document.pointerLockElement")
+				if locked == true:
+					capture_seen = true
+				elif capture_seen:
+					capture_seen = false
+					toggle_pause()
+	else:
+		capture_seen = false
+		var want := Input.MOUSE_MODE_HIDDEN if (state == State.READY or state == State.CLEARED) else Input.MOUSE_MODE_VISIBLE
+		if Input.mouse_mode != want:
+			Input.mouse_mode = want
+
+
 func toggle_pause() -> void:
 	if state == State.PLAY:
 		state = State.PAUSED
@@ -1355,6 +1389,7 @@ func play(sound: String, pitch := 1.0, vol_db := 0.0) -> void:
 func _process(delta: float) -> void:
 	var dt := minf(delta, 1.0 / 30.0)
 	var dbg_t0 := Time.get_ticks_usec()
+	sync_mouse_capture(delta)
 	if delta > 0.05 and state == State.PLAY and shot_path == "" and not perf_test:
 		stall_grace = 0.18
 	if frame_i == 30 and OS.has_feature("web"):
@@ -1402,7 +1437,7 @@ func update(dt: float) -> void:
 	if kd != 0:
 		paddle_x += kd * PADDLE_KEY_SPEED * dt
 		mouse_active = false
-	elif mouse_active and not touch_mode:
+	elif mouse_active and not touch_mode and state != State.PLAY:
 		paddle_x = get_global_mouse_position().x
 	if shot_path != "" or perf_test:
 		if state == State.READY and frame_i > 10:
