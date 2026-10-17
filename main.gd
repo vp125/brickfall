@@ -1329,6 +1329,13 @@ func setup_audio() -> void:
 	music_player.volume_db = -40.0
 	add_child(music_player)
 	audio_loading = true
+	if demo_mode:
+		# recording: build every sound before the first frame and start the music right away
+		Synth.budget_ms = 1.0e9
+		_build_audio_now()
+		audio_unlocked = true
+		try_start_music()
+		return
 	if OS.has_feature("web"):
 		# the web export runs without threads, so build after the first frames are on screen
 		get_tree().create_timer(0.3).timeout.connect(_build_audio_now)
